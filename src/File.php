@@ -1,9 +1,10 @@
 <?php
 /**
- * File Utility Class
+ * Enhanced File Utility Class
  *
  * Provides utility functions for working with files including
- * type detection, size formatting, and basic file operations.
+ * type detection, size formatting, local/remote file handling,
+ * and WordPress-specific optimizations.
  *
  * @package ArrayPress\FileUtils
  * @since   1.0.0
@@ -19,7 +20,7 @@ namespace ArrayPress\FileUtils;
  * File Class
  *
  * Core operations for working with files including type detection,
- * size formatting, and basic file operations.
+ * size formatting, and enhanced local/remote file operations.
  */
 class File {
 
@@ -74,6 +75,197 @@ class File {
 		}
 
 		return basename( $path );
+	}
+
+	/**
+	 * Check if URL/path points to a local file.
+	 *
+	 * @param string $file_url File URL or path.
+	 *
+	 * @return bool True if file is local.
+	 */
+	public static function is_local_file( string $file_url ): bool {
+		if ( empty( $file_url ) ) {
+			return false;
+		}
+
+		// Already a local path
+		if ( ! str_contains( $file_url, '://' ) ) {
+			return true;
+		}
+
+		$upload_dir = wp_upload_dir();
+		$site_url   = home_url();
+
+		// Check if it's within uploads directory
+		if ( strpos( $file_url, $upload_dir['baseurl'] ) === 0 ) {
+			return true;
+		}
+
+		// Check if it's within site URL
+		if ( strpos( $file_url, $site_url ) === 0 ) {
+			return true;
+		}
+
+		return false;
+	}
+
+	/**
+	 * Convert local URL to file path.
+	 *
+	 * @param string $file_url Local file URL.
+	 *
+	 * @return string|null Local file path or null if not local.
+	 */
+	public static function url_to_path( string $file_url ): ?string {
+		if ( empty( $file_url ) || ! self::is_local_file( $file_url ) ) {
+			return null;
+		}
+
+		// Already a local path
+		if ( ! str_contains( $file_url, '://' ) ) {
+			return $file_url;
+		}
+
+		$upload_dir = wp_upload_dir();
+
+		// Convert uploads URL to path
+		if ( strpos( $file_url, $upload_dir['baseurl'] ) === 0 ) {
+			return str_replace( $upload_dir['baseurl'], $upload_dir['basedir'], $file_url );
+		}
+
+		// Convert site URL to ABSPATH
+		$site_url = home_url();
+		if ( strpos( $file_url, $site_url ) === 0 ) {
+			$relative_path = str_replace( $site_url, '', $file_url );
+
+			return ABSPATH . ltrim( $relative_path, '/' );
+		}
+
+		return null;
+	}
+
+	/**
+	 * Get file size with smart local/remote detection.
+	 *
+	 * @param string $file_url File URL or path.
+	 *
+	 * @return int|null File size in bytes or null if not accessible.
+	 */
+	public static function get_size_from_url( string $file_url ): ?int {
+		if ( empty( $file_url ) ) {
+			return null;
+		}
+
+		// Try local file first for better performance
+		if ( self::is_local_file( $file_url ) ) {
+			$file_path = self::url_to_path( $file_url );
+			if ( $file_path && file_exists( $file_path ) ) {
+				$size = filesize( $file_path );
+
+				return $size !== false ? $size : null;
+			}
+		}
+
+		// Fallback to remote file headers
+		$response = wp_remote_head( $file_url, [
+			'timeout'    => 10,
+			'user-agent' => self::get_user_agent()
+		] );
+
+		if ( is_wp_error( $response ) ) {
+			return null;
+		}
+
+		$content_length = wp_remote_retrieve_header( $response, 'content-length' );
+
+		return $content_length ? (int) $content_length : null;
+	}
+
+	/**
+	 * Check if URL or path is accessible.
+	 *
+	 * @param string $file_url File URL or path.
+	 *
+	 * @return bool True if accessible.
+	 */
+	public static function url_exists( string $file_url ): bool {
+		if ( empty( $file_url ) ) {
+			return false;
+		}
+
+		// Check local file first for better performance
+		if ( self::is_local_file( $file_url ) ) {
+			$file_path = self::url_to_path( $file_url );
+
+			return $file_path && file_exists( $file_path );
+		}
+
+		// Check remote file
+		$response = wp_remote_head( $file_url, [
+			'timeout'    => 10,
+			'user-agent' => self::get_user_agent()
+		] );
+
+		if ( is_wp_error( $response ) ) {
+			return false;
+		}
+
+		$status_code = wp_remote_retrieve_response_code( $response );
+
+		return $status_code >= 200 && $status_code < 300;
+	}
+
+	/**
+	 * Check if file/URL is downloadable (accessible and has content).
+	 *
+	 * @param string $file_url File URL or path.
+	 *
+	 * @return bool True if downloadable.
+	 */
+	public static function is_downloadable( string $file_url ): bool {
+		if ( ! self::url_exists( $file_url ) ) {
+			return false;
+		}
+
+		// Local files are downloadable if they exist
+		if ( self::is_local_file( $file_url ) ) {
+			return true;
+		}
+
+		// Check remote file headers for downloadable content
+		$response = wp_remote_head( $file_url, [
+			'timeout'    => 10,
+			'user-agent' => self::get_user_agent()
+		] );
+
+		if ( is_wp_error( $response ) ) {
+			return false;
+		}
+
+		$content_type        = wp_remote_retrieve_header( $response, 'content-type' );
+		$content_disposition = wp_remote_retrieve_header( $response, 'content-disposition' );
+
+		// Check for explicit download header
+		if ( strpos( $content_disposition, 'attachment' ) !== false ) {
+			return true;
+		}
+
+		// Consider it downloadable if it's NOT web content
+		if ( empty( $content_type ) ) {
+			return false;
+		}
+
+		$web_content_types = [
+			'text/html',
+			'text/xml',
+			'application/xml',
+			'application/xhtml+xml'
+		];
+
+		$content_type = strtolower( trim( explode( ';', $content_type )[0] ) );
+
+		return ! in_array( $content_type, $web_content_types, true );
 	}
 
 	/**
@@ -393,6 +585,18 @@ class File {
 		$filetype = wp_check_filetype( $filename );
 
 		return ! empty( $filetype['type'] ) && ! empty( $filetype['ext'] );
+	}
+
+	/**
+	 * Get user agent string for HTTP requests.
+	 *
+	 * @return string User agent string.
+	 */
+	private static function get_user_agent(): string {
+		$site_name = get_bloginfo( 'name' );
+		$site_url  = home_url();
+
+		return "WordPress/{$site_name} (+{$site_url})";
 	}
 
 }
