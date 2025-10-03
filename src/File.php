@@ -1,10 +1,9 @@
 <?php
 /**
- * Enhanced File Utility Class
+ * File Utility Class
  *
- * Provides utility functions for working with files including
- * type detection, size formatting, local/remote file handling,
- * and WordPress-specific optimizations.
+ * Core file operations with WordPress integration including local/remote handling,
+ * URL to path conversion, and filesystem operations.
  *
  * @package ArrayPress\FileUtils
  * @since   1.0.0
@@ -19,8 +18,7 @@ namespace ArrayPress\FileUtils;
 /**
  * File Class
  *
- * Core operations for working with files including type detection,
- * size formatting, and enhanced local/remote file operations.
+ * Core file and path operations with WordPress integration.
  */
 class File {
 
@@ -30,7 +28,7 @@ class File {
 	 * @param string $filename  Filename or path.
 	 * @param bool   $lowercase Whether to return lowercase (default true).
 	 *
-	 * @return string File extension.
+	 * @return string File extension without dot.
 	 */
 	public static function get_extension( string $filename, bool $lowercase = true ): string {
 		if ( empty( $filename ) ) {
@@ -43,22 +41,7 @@ class File {
 	}
 
 	/**
-	 * Get filename without extension.
-	 *
-	 * @param string $filename Filename or path.
-	 *
-	 * @return string Filename without extension.
-	 */
-	public static function get_name( string $filename ): string {
-		if ( empty( $filename ) ) {
-			return '';
-		}
-
-		return pathinfo( $filename, PATHINFO_FILENAME );
-	}
-
-	/**
-	 * Get basename from path.
+	 * Get basename from path or URL.
 	 *
 	 * @param string $path File path or URL.
 	 *
@@ -75,6 +58,46 @@ class File {
 		}
 
 		return basename( $path );
+	}
+
+	/**
+	 * Normalize a path by resolving . and .. segments.
+	 *
+	 * @param string $path The path to normalize.
+	 *
+	 * @return string Normalized path.
+	 */
+	public static function normalize_path( string $path ): string {
+		if ( empty( $path ) ) {
+			return '';
+		}
+
+		// Convert backslashes to forward slashes
+		$path = str_replace( '\\', '/', $path );
+
+		// Preserve leading slash
+		$leading_slash = substr( $path, 0, 1 ) === '/' ? '/' : '';
+
+		// Preserve trailing slash
+		$trailing_slash = substr( $path, - 1 ) === '/' ? '/' : '';
+
+		// Split path into segments
+		$segments = explode( '/', trim( $path, '/' ) );
+		$result   = [];
+
+		foreach ( $segments as $segment ) {
+			if ( $segment === '.' || $segment === '' ) {
+				continue;
+			} elseif ( $segment === '..' ) {
+				if ( ! empty( $result ) ) {
+					array_pop( $result );
+				}
+			} else {
+				$result[] = $segment;
+			}
+		}
+
+		return $leading_slash . implode( '/', $result ) . $trailing_slash;
 	}
 
 	/**
@@ -146,7 +169,86 @@ class File {
 	}
 
 	/**
-	 * Get file size with smart local/remote detection.
+	 * Convert local file path to URL.
+	 *
+	 * @param string $file_path Local file path.
+	 *
+	 * @return string|null File URL or null if not convertible.
+	 */
+	public static function path_to_url( string $file_path ): ?string {
+		if ( empty( $file_path ) ) {
+			return null;
+		}
+
+		$upload_dir = wp_upload_dir();
+
+		// Convert uploads path to URL
+		if ( strpos( $file_path, $upload_dir['basedir'] ) === 0 ) {
+			return str_replace( $upload_dir['basedir'], $upload_dir['baseurl'], $file_path );
+		}
+
+		// Convert ABSPATH to site URL
+		if ( strpos( $file_path, ABSPATH ) === 0 ) {
+			$relative_path = str_replace( ABSPATH, '', $file_path );
+
+			return home_url( $relative_path );
+		}
+
+		return null;
+	}
+
+	/**
+	 * Check if file exists.
+	 *
+	 * @param string $path File path.
+	 *
+	 * @return bool True if file exists.
+	 */
+	public static function exists( string $path ): bool {
+		return file_exists( $path ) && is_file( $path );
+	}
+
+	/**
+	 * Check if file is readable.
+	 *
+	 * @param string $path File path.
+	 *
+	 * @return bool True if readable.
+	 */
+	public static function is_readable( string $path ): bool {
+		return is_readable( $path );
+	}
+
+	/**
+	 * Check if file is writable.
+	 *
+	 * @param string $path File path.
+	 *
+	 * @return bool True if writable.
+	 */
+	public static function is_writable( string $path ): bool {
+		return is_writable( $path );
+	}
+
+	/**
+	 * Get file size in bytes.
+	 *
+	 * @param string $path File path.
+	 *
+	 * @return int|null File size in bytes or null on failure.
+	 */
+	public static function get_size( string $path ): ?int {
+		if ( ! self::exists( $path ) ) {
+			return null;
+		}
+
+		$size = filesize( $path );
+
+		return $size !== false ? $size : null;
+	}
+
+	/**
+	 * Get file size from URL with smart local/remote detection.
 	 *
 	 * @param string $file_url File URL or path.
 	 *
@@ -183,7 +285,7 @@ class File {
 	}
 
 	/**
-	 * Check if URL or path is accessible.
+	 * Check if URL exists and is accessible.
 	 *
 	 * @param string $file_url File URL or path.
 	 *
@@ -217,374 +319,44 @@ class File {
 	}
 
 	/**
-	 * Check if file/URL is downloadable (accessible and has content).
+	 * Check if path is within a specific directory.
 	 *
-	 * @param string $file_url File URL or path.
+	 * @param string $path      Path to check.
+	 * @param string $directory Directory to check against.
 	 *
-	 * @return bool True if downloadable.
+	 * @return bool True if path is within directory.
 	 */
-	public static function is_downloadable( string $file_url ): bool {
-		if ( ! self::url_exists( $file_url ) ) {
+	public static function is_within_directory( string $path, string $directory ): bool {
+		$real_path = realpath( $path );
+		$real_dir  = realpath( $directory );
+
+		if ( $real_path === false || $real_dir === false ) {
 			return false;
 		}
 
-		// Local files are downloadable if they exist
-		if ( self::is_local_file( $file_url ) ) {
-			return true;
-		}
-
-		// Check remote file headers for downloadable content
-		$response = wp_remote_head( $file_url, [
-			'timeout'    => 10,
-			'user-agent' => self::get_user_agent()
-		] );
-
-		if ( is_wp_error( $response ) ) {
-			return false;
-		}
-
-		$content_type        = wp_remote_retrieve_header( $response, 'content-type' );
-		$content_disposition = wp_remote_retrieve_header( $response, 'content-disposition' );
-
-		// Check for explicit download header
-		if ( strpos( $content_disposition, 'attachment' ) !== false ) {
-			return true;
-		}
-
-		// Consider it downloadable if it's NOT web content
-		if ( empty( $content_type ) ) {
-			return false;
-		}
-
-		$web_content_types = [
-			'text/html',
-			'text/xml',
-			'application/xml',
-			'application/xhtml+xml'
-		];
-
-		$content_type = strtolower( trim( explode( ';', $content_type )[0] ) );
-
-		return ! in_array( $content_type, $web_content_types, true );
+		return strpos( $real_path, $real_dir ) === 0;
 	}
 
 	/**
-	 * Get MIME type from filename.
+	 * Check if path is within WordPress uploads directory.
 	 *
-	 * @param string $filename Filename.
+	 * @param string $path Path to check.
 	 *
-	 * @return string MIME type.
+	 * @return bool True if within uploads directory.
 	 */
-	public static function get_mime_type( string $filename ): string {
-		if ( empty( $filename ) ) {
-			return 'application/octet-stream';
-		}
+	public static function is_in_uploads( string $path ): bool {
+		$upload_dir = wp_upload_dir();
 
-		$filetype = wp_check_filetype( $filename );
-
-		return $filetype['type'] ?: 'application/octet-stream';
+		return self::is_within_directory( $path, $upload_dir['basedir'] );
 	}
 
 	/**
-	 * Get human-readable file type from filename.
+	 * Get WordPress uploads directory info.
 	 *
-	 * @param string $filename Filename.
-	 *
-	 * @return string Human-readable file type.
+	 * @return array WordPress uploads directory info.
 	 */
-	public static function get_type( string $filename ): string {
-		$mime_type = self::get_mime_type( $filename );
-
-		return MIME::get_description( $mime_type );
-	}
-
-	/**
-	 * Check if file is an image.
-	 *
-	 * @param string $filename Filename.
-	 *
-	 * @return bool True if an image.
-	 */
-	public static function is_image( string $filename ): bool {
-		$mime_type = self::get_mime_type( $filename );
-
-		return strpos( $mime_type, 'image/' ) === 0;
-	}
-
-	/**
-	 * Check if file is audio.
-	 *
-	 * @param string $filename Filename.
-	 *
-	 * @return bool True if audio.
-	 */
-	public static function is_audio( string $filename ): bool {
-		$mime_type = self::get_mime_type( $filename );
-
-		return strpos( $mime_type, 'audio/' ) === 0;
-	}
-
-	/**
-	 * Check if file is video.
-	 *
-	 * @param string $filename Filename.
-	 *
-	 * @return bool True if video.
-	 */
-	public static function is_video( string $filename ): bool {
-		$mime_type = self::get_mime_type( $filename );
-
-		return strpos( $mime_type, 'video/' ) === 0;
-	}
-
-	/**
-	 * Check if file is a document.
-	 *
-	 * @param string $filename Filename.
-	 *
-	 * @return bool True if document.
-	 */
-	public static function is_document( string $filename ): bool {
-		$mime_type = self::get_mime_type( $filename );
-
-		return MIME::is_type( $mime_type, 'document' );
-	}
-
-	/**
-	 * Check if file is an archive.
-	 *
-	 * @param string $filename Filename.
-	 *
-	 * @return bool True if archive.
-	 */
-	public static function is_archive( string $filename ): bool {
-		$mime_type = self::get_mime_type( $filename );
-
-		return MIME::is_type( $mime_type, 'archive' );
-	}
-
-	/**
-	 * Check if file exists.
-	 *
-	 * @param string $path File path.
-	 *
-	 * @return bool True if file exists.
-	 */
-	public static function exists( string $path ): bool {
-		return file_exists( $path ) && is_file( $path );
-	}
-
-	/**
-	 * Get file size in bytes.
-	 *
-	 * @param string $path File path.
-	 *
-	 * @return int|null File size in bytes or null on failure.
-	 */
-	public static function get_size( string $path ): ?int {
-		if ( ! self::exists( $path ) ) {
-			return null;
-		}
-
-		$size = filesize( $path );
-
-		return $size !== false ? $size : null;
-	}
-
-	/**
-	 * Format file size for display.
-	 *
-	 * @param int $bytes    File size in bytes.
-	 * @param int $decimals Number of decimal places.
-	 *
-	 * @return string Formatted file size.
-	 */
-	public static function format_size( int $bytes, int $decimals = 2 ): string {
-		return size_format( $bytes, $decimals );
-	}
-
-	/**
-	 * Get file contents.
-	 *
-	 * @param string $path File path.
-	 *
-	 * @return string|null File contents or null on failure.
-	 */
-	public static function get_contents( string $path ): ?string {
-		if ( ! self::exists( $path ) ) {
-			return null;
-		}
-
-		$contents = file_get_contents( $path );
-
-		return $contents !== false ? $contents : null;
-	}
-
-	/**
-	 * Put contents to file.
-	 *
-	 * @param string $path     File path.
-	 * @param string $contents Contents to write.
-	 *
-	 * @return bool True on success.
-	 */
-	public static function put_contents( string $path, string $contents ): bool {
-		return file_put_contents( $path, $contents ) !== false;
-	}
-
-	/**
-	 * Copy a file.
-	 *
-	 * @param string $source      Source file path.
-	 * @param string $destination Destination file path.
-	 *
-	 * @return bool True on success.
-	 */
-	public static function copy( string $source, string $destination ): bool {
-		if ( ! self::exists( $source ) ) {
-			return false;
-		}
-
-		return copy( $source, $destination );
-	}
-
-	/**
-	 * Move a file.
-	 *
-	 * @param string $source      Source file path.
-	 * @param string $destination Destination file path.
-	 *
-	 * @return bool True on success.
-	 */
-	public static function move( string $source, string $destination ): bool {
-		if ( ! self::exists( $source ) ) {
-			return false;
-		}
-
-		return rename( $source, $destination );
-	}
-
-	/**
-	 * Delete a file.
-	 *
-	 * @param string $path File path.
-	 *
-	 * @return bool True on success.
-	 */
-	public static function delete( string $path ): bool {
-		if ( ! self::exists( $path ) ) {
-			return false;
-		}
-
-		return unlink( $path );
-	}
-
-	/**
-	 * Check if file is readable.
-	 *
-	 * @param string $path File path.
-	 *
-	 * @return bool True if readable.
-	 */
-	public static function is_readable( string $path ): bool {
-		return is_readable( $path );
-	}
-
-	/**
-	 * Check if file is writable.
-	 *
-	 * @param string $path File path.
-	 *
-	 * @return bool True if writable.
-	 */
-	public static function is_writable( string $path ): bool {
-		return is_writable( $path );
-	}
-
-	/**
-	 * Get file modification time.
-	 *
-	 * @param string $path File path.
-	 *
-	 * @return int|null Last modified timestamp or null on failure.
-	 */
-	public static function get_modified_time( string $path ): ?int {
-		if ( ! self::exists( $path ) ) {
-			return null;
-		}
-
-		$time = filemtime( $path );
-
-		return $time !== false ? $time : null;
-	}
-
-	/**
-	 * Get file category (simpler version of get_type).
-	 *
-	 * @param string $filename Filename.
-	 *
-	 * @return string File category (image, video, audio, document, archive, other).
-	 */
-	public static function get_category( string $filename ): string {
-		$mime_type = self::get_mime_type( $filename );
-
-		if ( strpos( $mime_type, 'image/' ) === 0 ) {
-			return 'image';
-		}
-
-		if ( strpos( $mime_type, 'video/' ) === 0 ) {
-			return 'video';
-		}
-
-		if ( strpos( $mime_type, 'audio/' ) === 0 ) {
-			return 'audio';
-		}
-
-		// Document types
-		$document_types = [
-			'application/pdf',
-			'application/msword',
-			'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-			'application/vnd.ms-excel',
-			'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-			'application/vnd.ms-powerpoint',
-			'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-			'text/plain',
-			'text/csv',
-			'application/rtf'
-		];
-
-		if ( in_array( $mime_type, $document_types, true ) ) {
-			return 'document';
-		}
-
-		// Archive types
-		$archive_types = [
-			'application/zip',
-			'application/x-rar-compressed',
-			'application/x-tar',
-			'application/gzip',
-			'application/x-7z-compressed'
-		];
-
-		if ( in_array( $mime_type, $archive_types, true ) ) {
-			return 'archive';
-		}
-
-		return 'other';
-	}
-
-	/**
-	 * Check if file type is allowed by WordPress.
-	 *
-	 * @param string $filename Filename.
-	 *
-	 * @return bool True if file type is allowed.
-	 */
-	public static function is_allowed_type( string $filename ): bool {
-		$filetype = wp_check_filetype( $filename );
-
-		return ! empty( $filetype['type'] ) && ! empty( $filetype['ext'] );
+	public static function get_upload_dir(): array {
+		return wp_upload_dir();
 	}
 
 	/**

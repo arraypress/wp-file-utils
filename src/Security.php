@@ -1,9 +1,9 @@
 <?php
 /**
- * Security Utility Class
+ * File Security Utility Class
  *
- * Provides security utilities for file operations including
- * path sanitization, protocol filtering, and directory validation.
+ * Provides security utilities for file operations including path sanitization,
+ * filename validation, and protocol filtering.
  *
  * @package ArrayPress\FileUtils
  * @since   1.0.0
@@ -18,26 +18,9 @@ namespace ArrayPress\FileUtils;
 /**
  * Security Class
  *
- * File security utilities including path sanitization, protocol
- * filtering, filename validation, and directory safety checks.
+ * File security utilities for safe file operations.
  */
 class Security {
-
-	/**
-	 * Default restricted protocols.
-	 *
-	 * @var array
-	 */
-	private static array $restricted_protocols = [
-		'phar://',
-		'php://',
-		'glob://',
-		'data://',
-		'expect://',
-		'zip://',
-		'rar://',
-		'zlib://'
-	];
 
 	/**
 	 * Sanitize file path by removing dangerous protocols.
@@ -51,91 +34,8 @@ class Security {
 			return '';
 		}
 
-		// Check for protocols
-		if ( ! str_contains( $path, '://' ) && ! str_contains( $path, urlencode( '://' ) ) ) {
-			return $path;
-		}
-
-		// Remove restricted protocols
-		foreach ( self::get_protocols() as $protocol ) {
-			$pattern = '#^' . preg_quote( $protocol, '#' ) . '#i';
-			$path    = preg_replace( $pattern, '', $path );
-		}
-
-		return $path;
-	}
-
-	/**
-	 * Get restricted protocols.
-	 *
-	 * @return array Restricted protocols.
-	 */
-	public static function get_protocols(): array {
-		return array_merge(
-			self::$restricted_protocols,
-			array_map( 'urlencode', self::$restricted_protocols )
-		);
-	}
-
-	/**
-	 * Add restricted protocol.
-	 *
-	 * @param string $protocol Protocol to restrict.
-	 *
-	 * @return bool Success.
-	 */
-	public static function add_protocol( string $protocol ): bool {
-		if ( empty( $protocol ) ) {
-			return false;
-		}
-
-		// Ensure protocol ends with ://
-		if ( ! str_ends_with( $protocol, '://' ) ) {
-			$protocol .= '://';
-		}
-
-		if ( ! in_array( $protocol, self::$restricted_protocols, true ) ) {
-			self::$restricted_protocols[] = $protocol;
-		}
-
-		return true;
-	}
-
-	/**
-	 * Remove restricted protocol.
-	 *
-	 * @param string $protocol Protocol to remove.
-	 *
-	 * @return bool Success.
-	 */
-	public static function remove_protocol( string $protocol ): bool {
-		if ( empty( $protocol ) ) {
-			return false;
-		}
-
-		// Ensure protocol ends with ://
-		if ( ! str_ends_with( $protocol, '://' ) ) {
-			$protocol .= '://';
-		}
-
-		$key = array_search( $protocol, self::$restricted_protocols, true );
-		if ( $key !== false ) {
-			unset( self::$restricted_protocols[ $key ] );
-			self::$restricted_protocols = array_values( self::$restricted_protocols );
-
-			return true;
-		}
-
-		return false;
-	}
-
-	/**
-	 * Reset protocols to defaults.
-	 *
-	 * @return bool Success.
-	 */
-	public static function reset_protocols(): bool {
-		self::$restricted_protocols = [
+		// Remove dangerous protocols
+		$protocols = [
 			'phar://',
 			'php://',
 			'glob://',
@@ -146,13 +46,48 @@ class Security {
 			'zlib://'
 		];
 
-		return true;
+		foreach ( $protocols as $protocol ) {
+			if ( stripos( $path, $protocol ) === 0 ) {
+				$path = substr( $path, strlen( $protocol ) );
+			}
+			// Also check URL-encoded versions
+			$encoded = urlencode( $protocol );
+			if ( stripos( $path, $encoded ) === 0 ) {
+				$path = substr( $path, strlen( $encoded ) );
+			}
+		}
+
+		// Normalize path separators
+		$path = str_replace( '\\', '/', $path );
+
+		// Remove double dots
+		while ( strpos( $path, '../' ) !== false ) {
+			$path = str_replace( '../', '', $path );
+		}
+
+		return $path;
 	}
 
 	/**
-	 * Validate filename for security issues.
+	 * Sanitize filename for safe storage.
 	 *
-	 * @param string $filename Filename to validate.
+	 * @param string $filename Original filename.
+	 *
+	 * @return string Sanitized filename.
+	 */
+	public static function sanitize_filename( string $filename ): string {
+		if ( empty( $filename ) ) {
+			return '';
+		}
+
+		// Use WordPress function
+		return sanitize_file_name( $filename );
+	}
+
+	/**
+	 * Check if filename is safe.
+	 *
+	 * @param string $filename Filename to check.
 	 *
 	 * @return bool True if filename is safe.
 	 */
@@ -170,79 +105,42 @@ class Security {
 		}
 
 		// Check for dangerous extensions
-		$dangerous_extensions = [ 'php', 'phtml', 'php3', 'php4', 'php5', 'pht', 'phar', 'exe', 'bat', 'cmd', 'scr' ];
-		$extension            = strtolower( pathinfo( $filename, PATHINFO_EXTENSION ) );
+		$dangerous_extensions = [
+			'php',
+			'phtml',
+			'php3',
+			'php4',
+			'php5',
+			'php7',
+			'php8',
+			'pht',
+			'phar',
+			'exe',
+			'bat',
+			'cmd',
+			'com',
+			'scr',
+			'vbs',
+			'js',
+			'jsp',
+			'asp',
+			'aspx',
+			'cgi',
+			'sh'
+		];
 
-		if ( in_array( $extension, $dangerous_extensions, true ) ) {
-			return false;
-		}
+		$extension = strtolower( pathinfo( $filename, PATHINFO_EXTENSION ) );
 
-		return true;
+		return ! in_array( $extension, $dangerous_extensions, true );
 	}
 
 	/**
-	 * Check if path is within allowed directory.
-	 *
-	 * @param string $path          File path to check.
-	 * @param string $allowed_dir   Allowed directory.
-	 * @param bool   $resolve_paths Whether to resolve real paths.
-	 *
-	 * @return bool True if path is within allowed directory.
-	 */
-	public static function is_within_directory( string $path, string $allowed_dir, bool $resolve_paths = true ): bool {
-		if ( $resolve_paths ) {
-			$real_path = realpath( $path );
-			$real_dir  = realpath( $allowed_dir );
-
-			if ( $real_path === false || $real_dir === false ) {
-				return false;
-			}
-
-			return strpos( $real_path, $real_dir ) === 0;
-		}
-
-		$normalized_path = Path::normalize( $path );
-		$normalized_dir  = Path::normalize( $allowed_dir );
-
-		return strpos( $normalized_path, $normalized_dir ) === 0;
-	}
-
-	/**
-	 * Sanitize filename for safe storage.
-	 *
-	 * @param string $filename Original filename.
-	 *
-	 * @return string Sanitized filename.
-	 */
-	public static function sanitize_filename( string $filename ): string {
-		if ( empty( $filename ) ) {
-			return '';
-		}
-
-		// Get file parts
-		$info      = pathinfo( $filename );
-		$name      = $info['filename'] ?? '';
-		$extension = $info['extension'] ?? '';
-
-		// Sanitize filename part
-		$name = sanitize_file_name( $name );
-
-		// If we have an extension, add it back
-		if ( ! empty( $extension ) ) {
-			$extension = strtolower( $extension );
-			$name      = $name . '.' . $extension;
-		}
-
-		return $name;
-	}
-
-	/**
-	 * Check if file extension is allowed.
+	 * Check if file type is allowed.
 	 *
 	 * @param string $filename      Filename to check.
-	 * @param array  $allowed_types Allowed file types/extensions.
+	 * @param array  $allowed_types Array of allowed extensions or MIME types.
 	 *
-	 * @return bool True if file extension is allowed.
+	 * @return bool True if file type is allowed.
 	 */
 	public static function is_allowed_file_type( string $filename, array $allowed_types ): bool {
 		if ( empty( $filename ) || empty( $allowed_types ) ) {
@@ -250,25 +148,22 @@ class Security {
 		}
 
 		$extension = strtolower( File::get_extension( $filename ) );
-		$mime_type = File::get_mime_type( $filename );
+		$mime_type = MIME::get_type( $filename );
 
-		// Check if extension is directly allowed
+		// Check extension
 		if ( in_array( $extension, $allowed_types, true ) ) {
 			return true;
 		}
 
-		// Check if MIME type is allowed
+		// Check MIME type
 		if ( in_array( $mime_type, $allowed_types, true ) ) {
 			return true;
 		}
 
-		// Check if general type is allowed
-		$general_type = MIME::get_general_type( $mime_type );
-		if ( in_array( $general_type, $allowed_types, true ) ) {
-			return true;
-		}
+		// Check MIME category
+		$category = MIME::get_category( $mime_type );
 
-		return false;
+		return in_array( $category, $allowed_types, true );
 	}
 
 	/**
@@ -278,7 +173,7 @@ class Security {
 	 *
 	 * @return bool True if path is valid for uploads.
 	 */
-	public static function is_valid_upload_path( string $upload_path ): bool {
+	public static function validate_upload_path( string $upload_path ): bool {
 		if ( empty( $upload_path ) ) {
 			return false;
 		}
@@ -288,13 +183,41 @@ class Security {
 			return false;
 		}
 
-		// Check if it's within WordPress directory structure
+		// Check if it's within WordPress uploads directory
 		$wp_upload_dir = wp_upload_dir();
-		if ( ! self::is_within_directory( $upload_path, $wp_upload_dir['basedir'] ) ) {
-			return false;
+
+		return File::is_within_directory( $upload_path, $wp_upload_dir['basedir'] );
+	}
+
+	/**
+	 * Generate safe filename with optional uniqueness.
+	 *
+	 * @param string $filename    Original filename.
+	 * @param string $directory   Directory to check for uniqueness.
+	 * @param bool   $make_unique Whether to ensure filename is unique.
+	 *
+	 * @return string Safe filename.
+	 */
+	public static function generate_safe_filename( string $filename, string $directory = '', bool $make_unique = false ): string {
+		// Sanitize first
+		$safe_name = self::sanitize_filename( $filename );
+
+		if ( ! $make_unique || empty( $directory ) ) {
+			return $safe_name;
 		}
 
-		return true;
+		// Ensure unique filename
+		$info      = pathinfo( $safe_name );
+		$name      = $info['filename'] ?? 'file';
+		$extension = isset( $info['extension'] ) ? '.' . $info['extension'] : '';
+		$counter   = 1;
+
+		while ( file_exists( trailingslashit( $directory ) . $safe_name ) ) {
+			$safe_name = $name . '-' . $counter . $extension;
+			$counter ++;
+		}
+
+		return $safe_name;
 	}
 
 }

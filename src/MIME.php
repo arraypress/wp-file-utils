@@ -1,9 +1,9 @@
 <?php
 /**
- * MIME Utility Class
+ * MIME Type Utility Class
  *
- * Provides utility functions for working with MIME types including
- * type detection, categorization, and human-readable descriptions.
+ * Provides MIME type detection, categorization, and WordPress integration
+ * for file type handling and validation.
  *
  * @package ArrayPress\FileUtils
  * @since   1.0.0
@@ -18,15 +18,31 @@ namespace ArrayPress\FileUtils;
 /**
  * MIME Class
  *
- * MIME type utilities for detection, categorization, and WordPress
- * integration including extension mapping and type validation.
+ * MIME type detection and categorization utilities.
  */
 class MIME {
 
 	/**
+	 * Get MIME type from filename.
+	 *
+	 * @param string $filename Filename to check.
+	 *
+	 * @return string MIME type or 'application/octet-stream' if unknown.
+	 */
+	public static function get_type( string $filename ): string {
+		if ( empty( $filename ) ) {
+			return 'application/octet-stream';
+		}
+
+		$filetype = wp_check_filetype( $filename );
+
+		return $filetype['type'] ?: 'application/octet-stream';
+	}
+
+	/**
 	 * Get MIME type from file extension.
 	 *
-	 * @param string $extension File extension.
+	 * @param string $extension File extension without dot.
 	 *
 	 * @return string|null MIME type or null if not found.
 	 */
@@ -53,61 +69,76 @@ class MIME {
 	public static function get_extension_from_type( string $mime_type ): ?string {
 		$mime_types = array_flip( wp_get_mime_types() );
 
-		return $mime_types[ $mime_type ] ?? null;
+		if ( isset( $mime_types[ $mime_type ] ) ) {
+			$extensions = explode( '|', $mime_types[ $mime_type ] );
+
+			return $extensions[0] ?? null;
+		}
+
+		return null;
 	}
 
 	/**
-	 * Check if MIME type is in a specific category.
+	 * Check if MIME type belongs to a specific category.
 	 *
-	 * @param string $mime_type MIME type.
-	 * @param string $category  Category to check.
+	 * @param string $mime_type MIME type to check.
+	 * @param string $category  Category: 'image', 'audio', 'video', 'document', 'archive', 'code'.
 	 *
 	 * @return bool True if MIME type is in category.
 	 */
 	public static function is_type( string $mime_type, string $category ): bool {
-		$categories = [
-			'image'    => [ 'image/' ],
-			'audio'    => [ 'audio/' ],
-			'video'    => [ 'video/' ],
-			'document' => [
-				'application/pdf',
-				'application/msword',
-				'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-				'application/vnd.ms-excel',
-				'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-				'application/vnd.ms-powerpoint',
-				'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-				'text/plain',
-				'text/rtf'
-			],
-			'archive'  => [
-				'application/zip',
-				'application/x-rar-compressed',
-				'application/x-7z-compressed',
-				'application/x-tar',
-				'application/gzip'
-			],
-			'code'     => [
-				'text/html',
-				'text/css',
-				'application/javascript',
-				'application/json',
-				'application/xml',
-				'text/xml'
-			]
-		];
+		switch ( $category ) {
+			case 'image':
+				return str_starts_with( $mime_type, 'image/' );
 
-		if ( ! isset( $categories[ $category ] ) ) {
-			return false;
+			case 'audio':
+				return str_starts_with( $mime_type, 'audio/' );
+
+			case 'video':
+				return str_starts_with( $mime_type, 'video/' );
+
+			case 'document':
+				$document_types = [
+					'application/pdf',
+					'application/msword',
+					'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+					'application/vnd.ms-excel',
+					'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+					'application/vnd.ms-powerpoint',
+					'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+					'text/plain',
+					'text/csv',
+					'text/rtf'
+				];
+
+				return in_array( $mime_type, $document_types, true );
+
+			case 'archive':
+				$archive_types = [
+					'application/zip',
+					'application/x-rar-compressed',
+					'application/x-7z-compressed',
+					'application/x-tar',
+					'application/gzip'
+				];
+
+				return in_array( $mime_type, $archive_types, true );
+
+			case 'code':
+				$code_types = [
+					'text/html',
+					'text/css',
+					'application/javascript',
+					'application/json',
+					'application/xml',
+					'text/xml'
+				];
+
+				return in_array( $mime_type, $code_types, true );
+
+			default:
+				return false;
 		}
-
-		foreach ( $categories[ $category ] as $prefix ) {
-			if ( str_starts_with( $mime_type, $prefix ) ) {
-				return true;
-			}
-		}
-
-		return false;
 	}
 
 	/**
@@ -125,22 +156,16 @@ class MIME {
 			'image/gif'                                                                 => 'GIF Image',
 			'image/webp'                                                                => 'WebP Image',
 			'image/svg+xml'                                                             => 'SVG Image',
-			'image/bmp'                                                                 => 'BMP Image',
-			'image/tiff'                                                                => 'TIFF Image',
 
 			// Audio
 			'audio/mpeg'                                                                => 'MP3 Audio',
 			'audio/wav'                                                                 => 'WAV Audio',
 			'audio/ogg'                                                                 => 'OGG Audio',
-			'audio/mp4'                                                                 => 'M4A Audio',
-			'audio/flac'                                                                => 'FLAC Audio',
 
 			// Video
 			'video/mp4'                                                                 => 'MP4 Video',
 			'video/quicktime'                                                           => 'QuickTime Video',
 			'video/webm'                                                                => 'WebM Video',
-			'video/avi'                                                                 => 'AVI Video',
-			'video/x-msvideo'                                                           => 'AVI Video',
 
 			// Documents
 			'application/pdf'                                                           => 'PDF Document',
@@ -156,20 +181,16 @@ class MIME {
 			'text/html'                                                                 => 'HTML Document',
 			'text/css'                                                                  => 'CSS Stylesheet',
 			'text/csv'                                                                  => 'CSV File',
-			'text/rtf'                                                                  => 'Rich Text Document',
 
 			// Archives
 			'application/zip'                                                           => 'ZIP Archive',
 			'application/x-rar-compressed'                                              => 'RAR Archive',
 			'application/x-7z-compressed'                                               => '7-Zip Archive',
-			'application/x-tar'                                                         => 'TAR Archive',
-			'application/gzip'                                                          => 'GZip Archive',
 
 			// Code
 			'application/javascript'                                                    => 'JavaScript File',
 			'application/json'                                                          => 'JSON File',
-			'application/xml'                                                           => 'XML File',
-			'text/xml'                                                                  => 'XML File'
+			'application/xml'                                                           => 'XML File'
 		];
 
 		return $descriptions[ $mime_type ] ?? 'Unknown File Type';
@@ -180,14 +201,14 @@ class MIME {
 	 *
 	 * @param string $mime_type MIME type.
 	 *
-	 * @return string General category.
+	 * @return string Category: 'image', 'audio', 'video', 'document', 'archive', 'code', 'text', or 'other'.
 	 */
-	public static function get_general_type( string $mime_type ): string {
-		$types = [ 'image', 'audio', 'video', 'document', 'archive', 'code' ];
+	public static function get_category( string $mime_type ): string {
+		$categories = [ 'image', 'audio', 'video', 'document', 'archive', 'code' ];
 
-		foreach ( $types as $type ) {
-			if ( self::is_type( $mime_type, $type ) ) {
-				return $type;
+		foreach ( $categories as $category ) {
+			if ( self::is_type( $mime_type, $category ) ) {
+				return $category;
 			}
 		}
 
@@ -201,8 +222,8 @@ class MIME {
 	/**
 	 * Check if MIME type is allowed.
 	 *
-	 * @param string $mime_type     MIME type.
-	 * @param array  $allowed_types Allowed MIME types or categories.
+	 * @param string $mime_type     MIME type to check.
+	 * @param array  $allowed_types Array of allowed MIME types or categories.
 	 *
 	 * @return bool True if allowed.
 	 */
@@ -213,55 +234,9 @@ class MIME {
 		}
 
 		// Check category match
-		$general_type = self::get_general_type( $mime_type );
+		$category = self::get_category( $mime_type );
 
-		return in_array( $general_type, $allowed_types, true );
-	}
-
-	/**
-	 * Get common MIME types by category.
-	 *
-	 * @return array Common MIME types grouped by category.
-	 */
-	public static function get_common_types(): array {
-		return [
-			'image'    => [
-				'image/jpeg',
-				'image/png',
-				'image/gif',
-				'image/webp',
-				'image/svg+xml'
-			],
-			'audio'    => [
-				'audio/mpeg',
-				'audio/wav',
-				'audio/ogg',
-				'audio/mp4'
-			],
-			'video'    => [
-				'video/mp4',
-				'video/quicktime',
-				'video/webm',
-				'video/avi'
-			],
-			'document' => [
-				'application/pdf',
-				'application/msword',
-				'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-				'text/plain'
-			],
-			'archive'  => [
-				'application/zip',
-				'application/x-rar-compressed',
-				'application/x-7z-compressed'
-			],
-			'code'     => [
-				'text/html',
-				'text/css',
-				'application/javascript',
-				'application/json'
-			]
-		];
+		return in_array( $category, $allowed_types, true );
 	}
 
 	/**
@@ -274,42 +249,16 @@ class MIME {
 	}
 
 	/**
-	 * Get allowed file extensions from WordPress MIME types.
+	 * Check if MIME type is allowed by WordPress.
 	 *
-	 * @return array Array of allowed extensions.
-	 */
-	public static function get_allowed_extensions(): array {
-		$mime_types = self::get_allowed_types();
-		$extensions = [];
-
-		foreach ( $mime_types as $ext => $mime ) {
-			// Handle multiple extensions (e.g., "jpg|jpeg|jpe")
-			$ext_parts = explode( '|', $ext );
-			foreach ( $ext_parts as $extension ) {
-				$extensions[] = strtolower( trim( $extension ) );
-			}
-		}
-
-		return array_unique( $extensions );
-	}
-
-	/**
-	 * Get additional MIME types for modern file formats.
+	 * @param string $mime_type MIME type to check.
 	 *
-	 * @return array Additional MIME types.
+	 * @return bool True if allowed.
 	 */
-	public static function get_additional_types(): array {
-		return [
-			'webp' => 'image/webp',
-			'avif' => 'image/avif',
-			'heic' => 'image/heic',
-			'webm' => 'video/webm',
-			'flac' => 'audio/flac',
-			'opus' => 'audio/opus',
-			'7z'   => 'application/x-7z-compressed',
-			'epub' => 'application/epub+zip',
-			'mobi' => 'application/x-mobipocket-ebook'
-		];
+	public static function is_wordpress_allowed( string $mime_type ): bool {
+		$allowed = self::get_allowed_types();
+
+		return in_array( $mime_type, $allowed, true );
 	}
 
 }
