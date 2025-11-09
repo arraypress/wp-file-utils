@@ -14,7 +14,7 @@
 
 declare( strict_types=1 );
 
-namespace ArrayPress\Utils;
+namespace ArrayPress\FileUtils;
 
 /**
  * MIME Class
