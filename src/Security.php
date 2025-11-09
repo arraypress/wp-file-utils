@@ -2,18 +2,18 @@
 /**
  * File Security Utility Class
  *
- * Provides security utilities for file operations including path sanitization,
- * filename validation, and protocol filtering.
+ * Basic file security validation for SugarCart file handling.
  *
- * @package ArrayPress\FileUtils
- * @since   1.0.0
- * @author  ArrayPress
- * @license GPL-2.0-or-later
+ * @package     ArrayPress\Utils
+ * @copyright   Copyright (c) 2025, ArrayPress Limited
+ * @license     GPL2+
+ * @version     1.0.0
+ * @author      David Sherlock
  */
 
 declare( strict_types=1 );
 
-namespace ArrayPress\FileUtils;
+namespace ArrayPress\Utils;
 
 /**
  * Security Class
@@ -21,68 +21,6 @@ namespace ArrayPress\FileUtils;
  * File security utilities for safe file operations.
  */
 class Security {
-
-	/**
-	 * Sanitize file path by removing dangerous protocols.
-	 *
-	 * @param string $path File path to sanitize.
-	 *
-	 * @return string Sanitized path.
-	 */
-	public static function sanitize_path( string $path ): string {
-		if ( empty( $path ) ) {
-			return '';
-		}
-
-		// Remove dangerous protocols
-		$protocols = [
-			'phar://',
-			'php://',
-			'glob://',
-			'data://',
-			'expect://',
-			'zip://',
-			'rar://',
-			'zlib://'
-		];
-
-		foreach ( $protocols as $protocol ) {
-			if ( stripos( $path, $protocol ) === 0 ) {
-				$path = substr( $path, strlen( $protocol ) );
-			}
-			// Also check URL-encoded versions
-			$encoded = urlencode( $protocol );
-			if ( stripos( $path, $encoded ) === 0 ) {
-				$path = substr( $path, strlen( $encoded ) );
-			}
-		}
-
-		// Normalize path separators
-		$path = str_replace( '\\', '/', $path );
-
-		// Remove double dots
-		while ( strpos( $path, '../' ) !== false ) {
-			$path = str_replace( '../', '', $path );
-		}
-
-		return $path;
-	}
-
-	/**
-	 * Sanitize filename for safe storage.
-	 *
-	 * @param string $filename Original filename.
-	 *
-	 * @return string Sanitized filename.
-	 */
-	public static function sanitize_filename( string $filename ): string {
-		if ( empty( $filename ) ) {
-			return '';
-		}
-
-		// Use WordPress function
-		return sanitize_file_name( $filename );
-	}
 
 	/**
 	 * Check if filename is safe.
@@ -96,12 +34,14 @@ class Security {
 			return false;
 		}
 
-		// Check for dangerous characters
-		$dangerous_chars = [ '..', '/', '\\', ':', '*', '?', '"', '<', '>', '|', "\0" ];
-		foreach ( $dangerous_chars as $char ) {
-			if ( strpos( $filename, $char ) !== false ) {
-				return false;
-			}
+		// Check for path traversal attempts
+		if ( str_contains( $filename, '..' ) || str_contains( $filename, '/' ) || str_contains( $filename, '\\' ) ) {
+			return false;
+		}
+
+		// Check for null bytes
+		if ( str_contains( $filename, "\0" ) ) {
+			return false;
 		}
 
 		// Check for dangerous extensions
@@ -138,7 +78,7 @@ class Security {
 	 * Check if file type is allowed.
 	 *
 	 * @param string $filename      Filename to check.
-	 * @param array  $allowed_types Array of allowed extensions or MIME types.
+	 * @param array  $allowed_types Array of allowed extensions (without dots).
 	 *
 	 * @return bool True if file type is allowed.
 	 */
@@ -147,77 +87,58 @@ class Security {
 			return false;
 		}
 
-		$extension = strtolower( File::get_extension( $filename ) );
-		$mime_type = MIME::get_type( $filename );
+		$extension = strtolower( pathinfo( $filename, PATHINFO_EXTENSION ) );
 
-		// Check extension
-		if ( in_array( $extension, $allowed_types, true ) ) {
-			return true;
-		}
+		// Normalize allowed types (remove dots, lowercase)
+		$allowed_types = array_map( function ( $type ) {
+			return strtolower( ltrim( $type, '.' ) );
+		}, $allowed_types );
 
-		// Check MIME type
-		if ( in_array( $mime_type, $allowed_types, true ) ) {
-			return true;
-		}
-
-		// Check MIME category
-		$category = MIME::get_category( $mime_type );
-
-		return in_array( $category, $allowed_types, true );
+		return in_array( $extension, $allowed_types, true );
 	}
 
 	/**
-	 * Validate upload directory path.
+	 * Sanitize a file path.
 	 *
-	 * @param string $upload_path Upload directory path.
+	 * Removes dangerous protocols and path traversal attempts.
 	 *
-	 * @return bool True if path is valid for uploads.
+	 * @param string $path File path to sanitize.
+	 *
+	 * @return string Sanitized path.
 	 */
-	public static function validate_upload_path( string $upload_path ): bool {
-		if ( empty( $upload_path ) ) {
-			return false;
+	public static function sanitize_path( string $path ): string {
+		if ( empty( $path ) ) {
+			return '';
 		}
 
-		// Check if path exists and is writable
-		if ( ! is_dir( $upload_path ) || ! is_writable( $upload_path ) ) {
-			return false;
+		// Remove dangerous protocols
+		$protocols = [
+			'phar://',
+			'php://',
+			'glob://',
+			'data://',
+			'expect://',
+			'zip://',
+			'rar://',
+			'zlib://'
+		];
+
+		foreach ( $protocols as $protocol ) {
+			if ( stripos( $path, $protocol ) === 0 ) {
+				$path = substr( $path, strlen( $protocol ) );
+			}
 		}
 
-		// Check if it's within WordPress uploads directory
-		$wp_upload_dir = wp_upload_dir();
+		// Remove path traversal attempts
+		$path = str_replace( '..', '', $path );
 
-		return File::is_within_directory( $upload_path, $wp_upload_dir['basedir'] );
-	}
+		// Normalize slashes
+		$path = str_replace( '\\', '/', $path );
 
-	/**
-	 * Generate safe filename with optional uniqueness.
-	 *
-	 * @param string $filename    Original filename.
-	 * @param string $directory   Directory to check for uniqueness.
-	 * @param bool   $make_unique Whether to ensure filename is unique.
-	 *
-	 * @return string Safe filename.
-	 */
-	public static function generate_safe_filename( string $filename, string $directory = '', bool $make_unique = false ): string {
-		// Sanitize first
-		$safe_name = self::sanitize_filename( $filename );
+		// Remove double slashes (except after protocol)
+		$path = preg_replace( '#(?<!:)//+#', '/', $path );
 
-		if ( ! $make_unique || empty( $directory ) ) {
-			return $safe_name;
-		}
-
-		// Ensure unique filename
-		$info      = pathinfo( $safe_name );
-		$name      = $info['filename'] ?? 'file';
-		$extension = isset( $info['extension'] ) ? '.' . $info['extension'] : '';
-		$counter   = 1;
-
-		while ( file_exists( trailingslashit( $directory ) . $safe_name ) ) {
-			$safe_name = $name . '-' . $counter . $extension;
-			$counter ++;
-		}
-
-		return $safe_name;
+		return $path;
 	}
 
 }
