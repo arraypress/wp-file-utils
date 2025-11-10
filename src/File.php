@@ -294,4 +294,24 @@ class File {
 		return $path;
 	}
 
+	/**
+	 * Generate a clean filename with a new name but preserved extension.
+	 *
+	 * @param string $new_name      New name for the file (without extension).
+	 * @param string $original_path Original file path or filename.
+	 * @param bool   $lower_case    Whether to lowercase the filename.
+	 *
+	 * @return string Sanitized filename with original extension.
+	 */
+	public static function rename_preserve_extension( string $new_name, string $original_path, bool $lower_case = false ): string {
+		$extension = self::get_extension( $original_path );
+		$safe_name = sanitize_file_name( $new_name );
+
+		if ( $lower_case ) {
+			$safe_name = strtolower( $safe_name );
+		}
+
+		return $extension ? $safe_name . '.' . $extension : $safe_name;
+	}
+
 }
