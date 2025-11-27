@@ -45,13 +45,13 @@ class File {
 		$upload_dir = wp_upload_dir();
 
 		// Convert uploads URL to path (most common case)
-		if ( strpos( $file_url, $upload_dir['baseurl'] ) === 0 ) {
+		if ( str_starts_with( $file_url, $upload_dir['baseurl'] ) ) {
 			return str_replace( $upload_dir['baseurl'], $upload_dir['basedir'], $file_url );
 		}
 
 		// Convert site URL to ABSPATH
 		$site_url = home_url();
-		if ( strpos( $file_url, $site_url ) === 0 ) {
+		if ( str_starts_with( $file_url, $site_url ) ) {
 			$relative_path = str_replace( $site_url, '', $file_url );
 			$full_path     = ABSPATH . ltrim( $relative_path, '/' );
 
@@ -60,7 +60,7 @@ class File {
 
 		// Try content URL
 		$content_url = content_url();
-		if ( strpos( $file_url, $content_url ) === 0 ) {
+		if ( str_starts_with( $file_url, $content_url ) ) {
 			$relative_path = str_replace( $content_url, '', $file_url );
 			$full_path     = WP_CONTENT_DIR . ltrim( $relative_path, '/' );
 
@@ -85,17 +85,17 @@ class File {
 		$upload_dir = wp_upload_dir();
 
 		// Convert uploads path to URL (most common)
-		if ( strpos( $file_path, $upload_dir['basedir'] ) === 0 ) {
+		if ( str_starts_with( $file_path, $upload_dir['basedir'] ) ) {
 			return str_replace( $upload_dir['basedir'], $upload_dir['baseurl'], $file_path );
 		}
 
 		// Convert WP_CONTENT_DIR to URL
-		if ( strpos( $file_path, WP_CONTENT_DIR ) === 0 ) {
+		if ( str_starts_with( $file_path, WP_CONTENT_DIR ) ) {
 			return str_replace( WP_CONTENT_DIR, content_url(), $file_path );
 		}
 
 		// Convert ABSPATH to site URL
-		if ( strpos( $file_path, ABSPATH ) === 0 ) {
+		if ( str_starts_with( $file_path, ABSPATH ) ) {
 			$relative_path = str_replace( ABSPATH, '', $file_path );
 
 			return home_url( $relative_path );
